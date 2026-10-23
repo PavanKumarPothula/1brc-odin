@@ -7,4 +7,3 @@ The data was synthesized using the `create_measurements.py` script from the chal
 ## Attempt 1
 
 With my first attempt, I was able to process the 1 billion rows in 186 seconds on my laptop (approximately 3 minutes, run with `odin run . -o:speed`).
-

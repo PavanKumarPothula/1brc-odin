@@ -1,101 +1,126 @@
 package main
 
-import "core:os"
 import "core:fmt"
-import "core:math"
-import "core:bufio"
-import "core:slice"
-import "core:testing"
-import "core:strings"
+import "core:mem/virtual"
+import "core:os"
 import "core:strconv"
-import vmem "core:mem/virtual"
+import "core:strings"
+import "core:thread"
 
-attempt_1 := proc(path: string) -> string {
+mmapBuf: []u8
+	nproc :u8
 
+TempStats :: struct {
+	min_temp:    f32,
+	max_temp:    f32,
+	mean_temp:   f32,
+	num_records: u16,
+}
+CityMapType :: map[string]TempStats
 
-    file, file_error := os.open(path)
-
-    if file_error != 0 {
-        fmt.panicf("Could not open a file at path '%s'", path)
-    }
-
-    defer os.close(file)
-
-    reader: bufio.Reader
-	buffer: [1024]byte
-	bufio.reader_init_with_buf(&reader, os.stream_from_handle(file), buffer[:])
-    defer bufio.reader_destroy(&reader)
-
-    arena: vmem.Arena
-	arena_allocator := vmem.arena_allocator(&arena)
-
-    location_map := map[string]Stats{}
-
-    for {
-		line, read_error := bufio.reader_read_string(&reader, '\n', context.allocator)
-		if read_error != nil do break
-        defer delete(line)
-
-        line = strings.trim_right(line, "\r")
-        parts, _ := strings.split(line, ";") 
-        defer delete(parts)
-
-        key := strings.clone(parts[0], arena_allocator)
-        value, _ := strconv.parse_f32(parts[1])
-
-        seen := key in location_map
-
-        if !seen {
-            location_map[key] = Stats{value, value, value, 1}
-            continue
-        }
-
-        location, _ := location_map[key]
-        location.min = math.min(location.min, value)
-        location.max = math.max(location.max, value)
-        location.sum += value
-        location.count += 1
-
-        location_map[key] = location
+ThreadData :: struct {
+	threadID:    u8,
+	threadCount: u8,
+	cityMap:     CityMapType,
+}
+task :: proc(threadUnit: ^thread.Thread) {
+	threadData := (^ThreadData)(threadUnit.data)
+	ParserState :: enum {
+		cityName,
+		cityTemp,
 	}
 
-    entries, ok := slice.map_entries(location_map)
-    delete(location_map)
+	currentLineNumber: u32 = 0
+	toStore := (threadData.threadID == 0)
+	currentParserState := ParserState.cityName
 
-    slice.sort_by(entries, proc(x, y: slice.Map_Entry(string, Stats)) -> bool { return x.key < y.key})
+	tempCityName: string
+	tempBuf: [dynamic]u8
+	tempStats: TempStats
+	tempCityMap: CityMapType
 
-    builder := strings.builder_make()
-    strings.write_string(&builder, "{")
+	// fmt.println("Got mmap of size:", len(mmapBuf))
+	for bite, index in mmapBuf {
+		// fmt.print(rune(bite))
+		switch (bite) {
+		case ';':
+			{
+				switch currentParserState {
+				case ParserState.cityName:
+					{
+						tempCityName = strings.clone_from_bytes(tempBuf[:])
+						clear(&tempBuf)
+						currentParserState = ParserState.cityTemp
+						// fmt.println(tempCityName)
+					}
+				case ParserState.cityTemp:
+					{
+						//unreachable
+					}
+				}
+			}
+		case '\n':
+			{
+				if toStore {
+					currentTemp, isCasted := strconv.parse_f32(string(tempBuf[:]))
+					// currentTemp, floatinCastError := endian.get_f16(tempBuf[:], .Little)
+					defer clear(&tempBuf)
+					if !isCasted {
+						fmt.eprintfln("CannotCast for buf:", tempBuf[:])
+						os.exit(1)
+					}
+					if tempCityName in tempCityMap {
+						oldStats := tempCityMap[tempCityName]
 
-    for entry in entries {
-        k, v := entry.key, entry.value
-        summary := fmt.tprintf("%s=%3.1f/%3.1f/%3.1f", k, v.min, v.max, v.sum / v.count)
-        strings.write_string(&builder, summary)
-        strings.write_string(&builder, ", ")
-    }
+						tempCityMap[tempCityName] = TempStats {
+							max_temp    = max(currentTemp, oldStats.max_temp),
+							min_temp    = min(currentTemp, oldStats.min_temp),
+							mean_temp   = (((oldStats.mean_temp / 1 +
+										(1 / f32(oldStats.num_records)))) +
+								(currentTemp / (f32(oldStats.num_records) + 1))),
+							num_records = oldStats.num_records + 1,
+						}
+					} else {
+						tempCityMap[tempCityName] = TempStats {
+							mean_temp   = currentTemp,
+							max_temp    = currentTemp,
+							min_temp    = currentTemp,
+							num_records = 1,
+						}
+					}
+					fmt.println(tempCityName, "::", tempCityMap[tempCityName])
+				} else {
+					//NotInterestedInThis
+				}
+				currentLineNumber += 1
+				toStore = ((currentLineNumber % u32(threadCount)) == u32(threadID))
+				// fmt.println("LineNumber:", currentLineNumber, "toStore", toStore)
+				currentParserState = ParserState.cityName
+			}
+		case:
+			{
+				append(&tempBuf, bite)
+			}
+		}
+	}
 
-    // Remove last ", "
-    strings.pop_byte(&builder)
-    strings.pop_byte(&builder)
+	threadData.cityMap = tempCityMap
 
-    strings.write_string(&builder, "}")
-    result := strings.to_string(builder)
-    
-    strings.builder_destroy(&builder)
-    vmem.arena_destroy(&arena)
-
-    return result
 }
+attempt_1 :: proc(inputFile: string) {
+	fopenError: virtual.Map_File_Error
+	mmapBuf, fopenError = virtual.map_file_from_path(inputFile, {.Read})
+	if fopenError != nil {
+		fmt.eprintln(fopenError)
+		os.exit(1)
+	}
+	defer virtual.release(raw_data(mmapBuf), len(mmapBuf))
+	nproc = cast(u8)os.get_processor_core_count()
+	for tid in 0 ..= nproc {
 
-Stats :: struct {
-    min: f32,
-    max: f32,
-    sum: f32,
-    count: f32,
-}
+		threadHandle := thread.create(task)
 
-
-@(test)
-attempt_1_test :: proc(t: ^testing.T) {
-    out := attempt_1("./data/measurements-1_000.txt")
+		threadHandle.data
+	}
+	// fmt.println(returnMap)
 }

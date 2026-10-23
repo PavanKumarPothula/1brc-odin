@@ -1,0 +1,4 @@
+[tools]
+hyperfine = "latest"
+odin = "latest"
+ols = { version = "latest", rename_exe = { "ols-*" = "ols", "odinfmt-*" = "odinfmt" } }
