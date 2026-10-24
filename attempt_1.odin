@@ -8,7 +8,7 @@ import "core:strings"
 import "core:thread"
 
 mmapBuf: []u8
-	nproc :u8
+nproc: u8
 
 TempStats :: struct {
 	min_temp:    f32,
@@ -19,10 +19,11 @@ TempStats :: struct {
 CityMapType :: map[string]TempStats
 
 ThreadData :: struct {
-	threadID:    u8,
-	threadCount: u8,
-	cityMap:     CityMapType,
+	threadID: u8,
+	cityMap:  CityMapType,
+	isDone:   bool,
 }
+
 task :: proc(threadUnit: ^thread.Thread) {
 	threadData := (^ThreadData)(threadUnit.data)
 	ParserState :: enum {
@@ -88,12 +89,12 @@ task :: proc(threadUnit: ^thread.Thread) {
 							num_records = 1,
 						}
 					}
-					fmt.println(tempCityName, "::", tempCityMap[tempCityName])
+					// fmt.println(tempCityName, "::", tempCityMap[tempCityName])
 				} else {
 					//NotInterestedInThis
 				}
 				currentLineNumber += 1
-				toStore = ((currentLineNumber % u32(threadCount)) == u32(threadID))
+				toStore = ((currentLineNumber % u32(nproc)) == u32(threadData.threadID))
 				// fmt.println("LineNumber:", currentLineNumber, "toStore", toStore)
 				currentParserState = ParserState.cityName
 			}
@@ -105,7 +106,7 @@ task :: proc(threadUnit: ^thread.Thread) {
 	}
 
 	threadData.cityMap = tempCityMap
-
+	threadData.isDone = true
 }
 attempt_1 :: proc(inputFile: string) {
 	fopenError: virtual.Map_File_Error
@@ -116,11 +117,58 @@ attempt_1 :: proc(inputFile: string) {
 	}
 	defer virtual.release(raw_data(mmapBuf), len(mmapBuf))
 	nproc = cast(u8)os.get_processor_core_count()
-	for tid in 0 ..= nproc {
-
-		threadHandle := thread.create(task)
-
-		threadHandle.data
+	threadHandleArray: [12]^thread.Thread
+	threadDataArray: [12]ThreadData
+	for tid in 0 ..< nproc {
+		threadHandle := thread.create(task, name = "")
+		assert(threadHandle != nil)
+		threadDataArray[tid] = ThreadData {
+			threadID = tid,
+			isDone   = false,
+		}
+		threadHandle.data = &threadDataArray[tid]
+		thread.start(threadHandle)
+		thread.join(threadHandle)
+		threadHandleArray[tid] = threadHandle
 	}
-	// fmt.println(returnMap)
+
+	for threadHandle in threadHandleArray {
+		thread.destroy(threadHandle)
+	}
+	numRecords: u32 = 0
+	debug := false
+	if debug {
+		for threadData in threadDataArray {
+			fmt.println(
+				"threadID:",
+				threadData.threadID,
+				"cityMapKeySize:",
+				len(threadData.cityMap),
+				// "citymapData:",
+				// threadData.cityMap,
+			)
+			thisThreadRecords: u32
+			for _, v in threadData.cityMap {
+				thisThreadRecords += cast(u32)v.num_records
+			}
+			fmt.printfln("ThisThreadRecords: %d", thisThreadRecords)
+
+			// Iterate through the map keys
+			counter: u8
+			for key in threadData.cityMap {
+				if counter >= 5 {
+					break
+				}
+
+				fmt.println(key)
+				counter += 1
+			}
+
+			numRecords += thisThreadRecords
+
+			fmt.println("==================")
+		}
+
+		fmt.printfln("TotalRecords: %d", numRecords)
+	}
 }
