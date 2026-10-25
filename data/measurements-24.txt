@@ -1,0 +1,24 @@
+Kansas City;-0.8
+Damascus;19.8
+Kansas City;28.0
+La Ceiba;17.0
+Darwin;29.1
+New York City;2.1
+Lisbon;14.1
+Dar es Salaam;36.8
+Thiès;30.3
+Budapest;16.4
+Houston;33.6
+Melbourne;26.0
+Bissau;36.8
+Bilbao;24.0
+Austin;19.3
+Cracow;-8.1
+Malabo;14.4
+Ouarzazate;8.8
+Las Palmas de Gran Canaria;23.5
+Pittsburgh;10.2
+Ljubljana;15.1
+Yaoundé;17.9
+Tallinn;-7.1
+Rabat;22.3
